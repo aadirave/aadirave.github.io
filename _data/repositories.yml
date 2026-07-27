@@ -1,14 +1,20 @@
 github_users:
-  - torvalds
-  - alshedivat
+  - aadirave
 
 repo_description_lines_max: 2
 
 github_repos:
-  - alshedivat/al-folio
-  - jekyll/jekyll
-  - twbs/bootstrap
-  - jquery/jquery
-  - FortAwesome/Font-Awesome
-  - mathjax/MathJax
-  - jpswalsh/academicons
+  - aadirave/pong-ai
+  - aadirave/monopoly-simulator
+  - aadirave/pong
+  - aadirave/basic-compiler
+  - aadirave/regex-engine
+  - aadirave/enigma
+  - aadirave/brainfuck
+  - aadirave/metronome
+  - aadirave/aoc2025
+  - aadirave/ece-2k1-formulas
+  - aadirave/presentations
+  - aadirave/nvim
+  - aadirave/starship-prompt
+  - aadirave/aadirave.github.io
