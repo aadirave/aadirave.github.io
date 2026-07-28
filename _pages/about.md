@@ -26,4 +26,8 @@ latest_posts:
   limit: 3 # leave blank to include all the blog posts
 ---
 
-I'm Aadi, a computer engineering student at Purdue. I split my time between building, researching safer ML techniques, and learning. Consider this a log of what I'm working on.
+I'm a senior at Purdue double majoring in Computer Engineering and Mathematics. Currently, I'm working on:
+
+- verifiable ML techniques (with Dr. Zahra Ghodsi)
+- making LLMs more efficient (watch this space!)
+- reaching 1500 chess.com ELO
