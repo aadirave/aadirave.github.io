@@ -210,8 +210,10 @@ kramdown:
 # Includes & excludes
 include: [".nojekyll", "_pages"]
 exclude:
+  - AGENTS.md
   - al-folio-upgrade-report.md
   - bin/
+  - CLAUDE.md
   - CONTRIBUTING.md
   - CUSTOMIZE.md
   - Dockerfile
@@ -230,6 +232,8 @@ exclude:
   - purgecss.config.js
   - README.md
   - readme_preview/
+  - requirements.txt
+  - test/
   - gems/
   - migrations/
   - vendor
