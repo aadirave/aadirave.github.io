@@ -31,13 +31,13 @@ npm ci && npm run lint:prettier
 
 ## Layout
 
-| Path                              | Contents                                                                 |
-| --------------------------------- | ------------------------------------------------------------------------ |
-| `_pages/`                         | the pages themselves (about, blog, projects, publications, repositories) |
-| `_posts/`, `_projects/`, `_news/` | content collections                                                      |
-| `_data/`                          | social links, the repository list shown on `/repositories/`              |
-| `_config.yml`                     | site settings, plugin wiring, feature flags                              |
-| `assets/`                         | images and other static files                                            |
+| Path                              | Contents                                                   |
+| --------------------------------- | ---------------------------------------------------------- |
+| `_pages/`                         | the pages themselves (about, blog, projects, publications) |
+| `_posts/`, `_projects/`, `_news/` | content collections                                        |
+| `_data/`                          | social links                                               |
+| `_config.yml`                     | site settings, plugin wiring, feature flags                |
+| `assets/`                         | images and other static files                              |
 
 Layouts, includes, styles, and feature JavaScript are **not** in this repo —
 they ship in the versioned `al_*` gems pinned in the `Gemfile`. See
