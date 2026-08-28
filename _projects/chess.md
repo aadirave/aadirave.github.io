@@ -35,6 +35,14 @@ importance: 1
     box-shadow: 0 2px 10px rgb(0 0 0 / 20%);
   }
 
+  /* The engine never came up (or a request round-trip failed hard enough to
+     leave it unusable): dim the board rather than leaving it looking merely
+     unresponsive, and block input to it -- New Game still lives in the panel. */
+  .chess-board.is-unavailable {
+    opacity: 0.5;
+    pointer-events: none;
+  }
+
   .chess-square {
     position: relative;
     display: flex;
@@ -48,7 +56,14 @@ importance: 1
     cursor: pointer;
     background-repeat: no-repeat;
     background-position: center;
-    touch-action: none; /* a drag across the board must not scroll the page */
+    touch-action: pan-x pan-y; /* a plain tap or scroll must reach the page by default */
+  }
+
+  /* Only once a drag is confirmed (past the pick-up threshold) does it block
+     native panning -- doing this unconditionally on every square would trap
+     any swipe that starts on the board, confirmed drag or not. */
+  .chess-board.is-drag-active .chess-square {
+    touch-action: none;
   }
 
   .chess-piece {

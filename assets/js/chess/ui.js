@@ -57,7 +57,7 @@ class ChessBoard {
     this.root = root;
     this.engineUrl = options.engineUrl;
     this.pieceBaseUrl = options.pieceBaseUrl;
-    this.engine = new EngineClient(options.workerUrl);
+    this.workerUrl = options.workerUrl;
     this.squares = new Map();
     this.position = null;
     this.legalMoves = [];
@@ -66,18 +66,41 @@ class ChessBoard {
     this.drag = null;
     this.suppressClick = false;
     this.busy = true;
+    // Explicit "the engine has never come up" state -- separate from `busy`,
+    // which is transient, so a failed init can't be confused with a move in
+    // flight and New Game knows to retry the init sequence rather than play.
+    this.ready = false;
+    // Bumped on every new-game and every move; a response is discarded once
+    // this has moved on, so a slow reply from a superseded game/move can
+    // never overwrite fresher state (see start/play/engineReply/onNewGame).
+    this.generation = 0;
     this.onPointerMove = this.onPointerMove.bind(this);
     this.onPointerUp = this.onPointerUp.bind(this);
+    this.onPointerCancel = this.onPointerCancel.bind(this);
     this.buildDom();
   }
 
   async start() {
+    const gen = ++this.generation;
+    // A fresh Worker, not just a fresh INIT request: if the previous one
+    // failed to load at all, it will never answer another postMessage.
+    this.engine?.worker.terminate();
+    this.engine = new EngineClient(this.workerUrl);
+    this.busy = true;
+    this.setStatus("Loading…");
     try {
       await this.engine.request(REQ.INIT, { engineUrl: this.engineUrl });
-      await this.refresh();
-      this.busy = false;
+      if (gen !== this.generation) return;
+      this.ready = true;
+      this.boardEl.classList.remove("is-unavailable");
+      await this.refresh(gen);
     } catch (error) {
-      this.setStatus(`Engine unavailable: ${error.message}`);
+      if (gen !== this.generation) return;
+      this.ready = false;
+      this.boardEl.classList.add("is-unavailable");
+      this.setStatus(`Engine unavailable: ${error.message} — click New Game to retry.`);
+    } finally {
+      if (gen === this.generation) this.busy = false;
     }
   }
 
@@ -146,6 +169,7 @@ class ChessBoard {
     panel.append(status, controls, promotion);
 
     this.root.replaceChildren(board, panel);
+    this.boardEl = board;
     this.statusEl = status;
     this.promotionEl = promotion;
     this.replyToggle = replyToggle;
@@ -155,12 +179,18 @@ class ChessBoard {
     this.statusEl.textContent = text;
   }
 
-  async refresh() {
+  async refresh(gen) {
+    // A stale picker can't refer to the position we're about to show, whoever
+    // ends up winning the race below.
+    this.hidePromotion();
     const [fen, moves, status] = await Promise.all([
       this.engine.request(REQ.FEN),
       this.engine.request(REQ.LEGAL_MOVES),
       this.engine.request(REQ.STATUS),
     ]);
+    // Superseded by a newer game or move while these requests were in
+    // flight -- applying this response now would show a stale position.
+    if (gen !== this.generation) return;
     this.position = parseFen(fen);
     this.legalMoves = moves.split(" ").filter(Boolean);
     this.selected = null;
@@ -269,15 +299,21 @@ class ChessBoard {
   }
 
   onPointerDown(event, square) {
-    if (this.busy || !this.position || event.button !== 0 || !this.canPickUp(square)) return;
+    // A fresh gesture always resolves the last one's leftovers: a completed
+    // drag only ever gets a matching click when it lands back on its own
+    // square (see onPointerUp), so a cross-square drop would otherwise leave
+    // suppressClick stuck and eat this square's own, unrelated click.
     this.suppressClick = false;
-    this.drag = { from: square, startX: event.clientX, startY: event.clientY, active: false };
+    this.hidePromotion();
+    if (this.drag || this.busy || !this.position || event.button !== 0 || !this.canPickUp(square)) return;
+    this.drag = { from: square, startX: event.clientX, startY: event.clientY, active: false, pointerId: event.pointerId };
     window.addEventListener("pointermove", this.onPointerMove);
     window.addEventListener("pointerup", this.onPointerUp);
+    window.addEventListener("pointercancel", this.onPointerCancel);
   }
 
   onPointerMove(event) {
-    if (!this.drag) return;
+    if (!this.drag || event.pointerId !== this.drag.pointerId) return;
     if (!this.drag.active) {
       if (Math.hypot(event.clientX - this.drag.startX, event.clientY - this.drag.startY) < DRAG_THRESHOLD_PX) return;
       this.beginDrag();
@@ -299,6 +335,9 @@ class ChessBoard {
     this.drag.active = true;
     this.drag.ghost = ghost;
     this.selected = this.drag.from;
+    // Only a confirmed drag blocks native panning -- a plain tap must still
+    // be able to scroll the page (or, mid-tap, do nothing at all).
+    this.boardEl.classList.add("is-drag-active");
     this.render();
   }
 
@@ -307,19 +346,47 @@ class ChessBoard {
     ghost.style.transform = `translate(${x - ghost.offsetWidth / 2}px, ${y - ghost.offsetHeight / 2}px)`;
   }
 
-  onPointerUp(event) {
+  /**
+   * Shared teardown for a drag that ended, whether by drop or by
+   * pointercancel: listeners, the ghost, the drag state, and the scroll lock
+   * all have to go together or one of them leaks.
+   */
+  endDrag() {
     window.removeEventListener("pointermove", this.onPointerMove);
     window.removeEventListener("pointerup", this.onPointerUp);
+    window.removeEventListener("pointercancel", this.onPointerCancel);
     const drag = this.drag;
     this.drag = null;
-    if (!drag || !drag.active) return;
+    if (drag?.active) {
+      drag.ghost.remove();
+      this.boardEl.classList.remove("is-drag-active");
+      this.render();
+    }
+    return drag;
+  }
 
-    drag.ghost.remove();
-    this.suppressClick = true;
-    this.render();
+  onPointerUp(event) {
+    if (!this.drag || event.pointerId !== this.drag.pointerId) return;
+    const drag = this.endDrag();
+    if (!drag.active) return;
 
     const dropped = document.elementFromPoint(event.clientX, event.clientY)?.closest(".chess-square");
-    if (dropped && dropped.dataset.square !== drag.from) this.attemptMove(drag.from, dropped.dataset.square);
+    if (dropped && dropped.dataset.square !== drag.from) {
+      // Dropping on a different square means pointerdown and pointerup hit
+      // different elements, so no click follows to consume this flag here --
+      // it only guards against a synthetic click some browsers still fire on
+      // the drop square. A drop back on the origin square gets a real click
+      // (down and up share a target) and must not have it swallowed.
+      this.suppressClick = true;
+      this.attemptMove(drag.from, dropped.dataset.square);
+    }
+  }
+
+  onPointerCancel(event) {
+    // OS-level interruption (an incoming call, a system gesture): tear down
+    // and leave the position exactly as it was, playing no move.
+    if (!this.drag || event.pointerId !== this.drag.pointerId) return;
+    this.endDrag();
   }
 
   // --- moves -----------------------------------------------------------------
@@ -354,41 +421,64 @@ class ChessBoard {
   }
 
   async play(move) {
+    const gen = ++this.generation;
     this.busy = true;
     try {
       const accepted = await this.engine.request(REQ.PUSH, { move });
+      // A new game (or, in principle, another move) has already superseded
+      // this one -- whatever it did to the board and the status stands.
+      if (gen !== this.generation) return;
       if (!accepted) {
         this.setStatus("The engine rejected that move.");
         return;
       }
       this.lastMove = parseUci(move);
-      await this.refresh();
-      if (this.replyToggle.checked) await this.engineReply();
+      await this.refresh(gen);
+      if (gen !== this.generation) return;
+      if (this.replyToggle.checked) await this.engineReply(gen);
     } catch (error) {
-      this.setStatus(`Engine error: ${error.message}`);
+      if (gen === this.generation) this.setStatus(`Engine error: ${error.message}`);
     } finally {
-      this.busy = false;
+      if (gen === this.generation) this.busy = false;
     }
   }
 
-  async engineReply() {
+  async engineReply(gen) {
     this.setStatus("Thinking…");
     const best = await this.engine.request(REQ.SEARCH, { movetimeMs: MOVETIME_MS, maxDepth: MAX_DEPTH });
+    if (gen !== this.generation) return;
     if (!best) return;
-    await this.engine.request(REQ.PUSH, { move: best });
+    // Mirror play()'s own rejection path: the engine's move is not exempt
+    // from being an authority-checked move just because it made it itself.
+    const accepted = await this.engine.request(REQ.PUSH, { move: best });
+    if (gen !== this.generation) return;
+    if (!accepted) {
+      this.setStatus("The engine's own reply was rejected.");
+      return;
+    }
     this.lastMove = parseUci(best);
-    await this.refresh();
+    await this.refresh(gen);
   }
 
   async onNewGame() {
+    if (!this.ready) {
+      // The engine never came up; New Game doubles as the retry action
+      // rather than adding a second control for the same recovery.
+      await this.start();
+      return;
+    }
+    const gen = ++this.generation;
     this.busy = true;
     try {
       await this.engine.request(REQ.NEW_GAME);
+      if (gen !== this.generation) return;
       this.lastMove = null;
       this.hidePromotion();
-      await this.refresh();
+      await this.refresh(gen);
+    } catch (error) {
+      if (gen === this.generation) this.setStatus(`Engine error: ${error.message}`);
     } finally {
-      this.busy = false;
+      if (gen === this.generation) this.busy = false;
     }
   }
 }

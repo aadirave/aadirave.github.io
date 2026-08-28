@@ -25,19 +25,31 @@ export function colorOf(piece) {
 
 /**
  * @returns {{pieces: (string|null)[], turn: string, castling: string, enPassant: string, halfmove: number, fullmove: number}}
+ * @throws {Error} if the placement field isn't 8 ranks of 8 files each -- this
+ *   runs on every backend reply, so a malformed FEN must fail loudly here
+ *   rather than silently overrun `pieces` and corrupt the board.
  */
 export function parseFen(fen) {
   const [placement, turn = "w", castling = "-", enPassant = "-", halfmove = "0", fullmove = "1"] = fen.trim().split(/\s+/);
+  const ranks = placement.split("/");
+  if (ranks.length !== 8) throw new Error(`invalid FEN placement "${placement}": expected 8 ranks, got ${ranks.length}`);
+
   const pieces = new Array(64).fill(null);
   let index = 0;
-  for (const char of placement) {
-    if (char === "/") continue;
-    if (char >= "1" && char <= "8") {
-      index += Number(char);
-    } else {
+  for (const rank of ranks) {
+    let files = 0;
+    for (const char of rank) {
+      if (char >= "1" && char <= "8") {
+        files += Number(char);
+        index += Number(char);
+        continue;
+      }
+      files += 1;
+      if (index < 0 || index > 63) throw new Error(`invalid FEN placement "${placement}": rank overruns the board`);
       pieces[index] = char;
       index += 1;
     }
+    if (files !== 8) throw new Error(`invalid FEN placement "${placement}": rank "${rank}" does not sum to 8 files`);
   }
   return { pieces, turn, castling, enPassant, halfmove: Number(halfmove), fullmove: Number(fullmove) };
 }
