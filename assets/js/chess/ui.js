@@ -1,6 +1,5 @@
 /**
- * Dependency-free chess board: 8x8 grid, Unicode glyphs, click a piece then
- * click a destination.
+ * Dependency-free chess board: 8x8 grid, SVG pieces, click-to-move or drag.
  *
  * The board knows no rules. Every legal destination it offers comes from the
  * engine's own move list, and every move it plays is one the engine accepted,
@@ -10,9 +9,9 @@
 import { REQ, RES, STATUS } from "./protocol.js";
 import { colorOf, indexToSquare, parseFen, parseUci, squareToIndex } from "./fen.js";
 
-const GLYPHS = { k: "♚", q: "♛", r: "♜", b: "♝", n: "♞", p: "♟" };
 const PIECE_NAMES = { k: "king", q: "queen", r: "rook", b: "bishop", n: "knight", p: "pawn" };
 const PROMOTION_ORDER = ["q", "r", "b", "n"];
+const DRAG_THRESHOLD_PX = 5;
 const MOVETIME_MS = 300;
 const MAX_DEPTH = 8;
 
@@ -57,13 +56,18 @@ class ChessBoard {
   constructor(root, options) {
     this.root = root;
     this.engineUrl = options.engineUrl;
+    this.pieceBaseUrl = options.pieceBaseUrl;
     this.engine = new EngineClient(options.workerUrl);
     this.squares = new Map();
     this.position = null;
     this.legalMoves = [];
     this.selected = null;
     this.lastMove = null;
+    this.drag = null;
+    this.suppressClick = false;
     this.busy = true;
+    this.onPointerMove = this.onPointerMove.bind(this);
+    this.onPointerUp = this.onPointerUp.bind(this);
     this.buildDom();
   }
 
@@ -75,6 +79,10 @@ class ChessBoard {
     } catch (error) {
       this.setStatus(`Engine unavailable: ${error.message}`);
     }
+  }
+
+  pieceUrl(piece) {
+    return `${this.pieceBaseUrl}${colorOf(piece)}${piece.toLowerCase()}.svg`;
   }
 
   buildDom() {
@@ -90,7 +98,18 @@ class ChessBoard {
       button.dataset.shade = (Math.floor(index / 8) + (index % 8)) % 2 === 0 ? "light" : "dark";
       if (index >= 56) button.dataset.file = square[0];
       if (index % 8 === 0) button.dataset.rank = square[1];
+
+      // One <img> per square, reused across renders so dragging a piece never
+      // races a freshly created element.
+      const image = document.createElement("img");
+      image.className = "chess-piece";
+      image.alt = "";
+      image.draggable = false;
+      image.hidden = true;
+      button.appendChild(image);
+
       button.addEventListener("click", () => this.onSquareClick(square));
+      button.addEventListener("pointerdown", (event) => this.onPointerDown(event, square));
       board.appendChild(button);
       this.squares.set(square, button);
     }
@@ -173,13 +192,29 @@ class ChessBoard {
     return this.legalMoves.filter((move) => move.startsWith(square));
   }
 
+  pieceAt(square) {
+    return this.position ? this.position.pieces[squareToIndex(square)] : null;
+  }
+
+  canPickUp(square) {
+    const piece = this.pieceAt(square);
+    return Boolean(piece) && colorOf(piece) === this.position.turn && this.movesFrom(square).length > 0;
+  }
+
   render() {
     const targets = this.selected ? new Set(this.movesFrom(this.selected).map((move) => parseUci(move).to)) : new Set();
 
     this.squares.forEach((button, square) => {
-      const piece = this.position.pieces[squareToIndex(square)];
-      const symbol = piece ? GLYPHS[piece.toLowerCase()] : "";
-      button.textContent = symbol;
+      const piece = this.pieceAt(square);
+      const image = button.firstElementChild;
+      if (piece) {
+        const url = this.pieceUrl(piece);
+        if (image.getAttribute("src") !== url) image.setAttribute("src", url);
+        image.hidden = false;
+      } else {
+        image.hidden = true;
+      }
+
       button.dataset.color = piece ? colorOf(piece) : "";
       button.setAttribute(
         "aria-label",
@@ -190,39 +225,119 @@ class ChessBoard {
       button.classList.toggle("is-target", targets.has(square) && !piece);
       button.classList.toggle("is-capture", targets.has(square) && Boolean(piece));
       button.classList.toggle("is-last-move", this.lastMove ? square === this.lastMove.from || square === this.lastMove.to : false);
+      button.classList.toggle("is-dragging", Boolean(this.drag?.active) && square === this.drag.from);
     });
   }
 
-  async onSquareClick(square) {
+  // --- interaction -----------------------------------------------------------
+
+  onSquareClick(square) {
+    // A completed drag also produces a click; it must not undo the drop.
+    if (this.suppressClick) {
+      this.suppressClick = false;
+      return;
+    }
     if (this.busy || !this.position) return;
     this.hidePromotion();
 
-    if (this.selected) {
-      const candidates = this.movesFrom(this.selected).filter((move) => parseUci(move).to === square);
-      if (candidates.length > 1) {
-        this.showPromotion(candidates);
-        return;
-      }
-      if (candidates.length === 1) {
-        await this.play(candidates[0]);
-        return;
-      }
+    if (this.selected && this.selected !== square) {
+      this.attemptMove(this.selected, square);
+      return;
     }
+    this.select(this.canPickUp(square) && square !== this.selected ? square : null);
+  }
 
-    const piece = this.position.pieces[squareToIndex(square)];
-    const selectable = piece && colorOf(piece) === this.position.turn && this.movesFrom(square).length > 0;
-    this.selected = selectable && square !== this.selected ? square : null;
+  select(square) {
+    this.selected = square;
     this.render();
   }
+
+  attemptMove(from, to) {
+    const candidates = this.movesFrom(from).filter((move) => parseUci(move).to === to);
+    if (candidates.length > 1) {
+      this.select(from);
+      this.showPromotion(candidates);
+      return;
+    }
+    if (candidates.length === 1) {
+      this.play(candidates[0]);
+      return;
+    }
+    // Not a move the engine offers: keep the piece in hand rather than
+    // silently dropping the selection.
+    this.select(this.canPickUp(to) ? to : from);
+  }
+
+  onPointerDown(event, square) {
+    if (this.busy || !this.position || event.button !== 0 || !this.canPickUp(square)) return;
+    this.suppressClick = false;
+    this.drag = { from: square, startX: event.clientX, startY: event.clientY, active: false };
+    window.addEventListener("pointermove", this.onPointerMove);
+    window.addEventListener("pointerup", this.onPointerUp);
+  }
+
+  onPointerMove(event) {
+    if (!this.drag) return;
+    if (!this.drag.active) {
+      if (Math.hypot(event.clientX - this.drag.startX, event.clientY - this.drag.startY) < DRAG_THRESHOLD_PX) return;
+      this.beginDrag();
+    }
+    this.moveGhost(event.clientX, event.clientY);
+  }
+
+  beginDrag() {
+    const source = this.squares.get(this.drag.from);
+    const rect = source.getBoundingClientRect();
+    const ghost = document.createElement("img");
+    ghost.className = "chess-drag-ghost";
+    ghost.src = this.pieceUrl(this.pieceAt(this.drag.from));
+    ghost.alt = "";
+    ghost.style.width = `${rect.width}px`;
+    ghost.style.height = `${rect.height}px`;
+    document.body.appendChild(ghost);
+
+    this.drag.active = true;
+    this.drag.ghost = ghost;
+    this.selected = this.drag.from;
+    this.render();
+  }
+
+  moveGhost(x, y) {
+    const ghost = this.drag.ghost;
+    ghost.style.transform = `translate(${x - ghost.offsetWidth / 2}px, ${y - ghost.offsetHeight / 2}px)`;
+  }
+
+  onPointerUp(event) {
+    window.removeEventListener("pointermove", this.onPointerMove);
+    window.removeEventListener("pointerup", this.onPointerUp);
+    const drag = this.drag;
+    this.drag = null;
+    if (!drag || !drag.active) return;
+
+    drag.ghost.remove();
+    this.suppressClick = true;
+    this.render();
+
+    const dropped = document.elementFromPoint(event.clientX, event.clientY)?.closest(".chess-square");
+    if (dropped && dropped.dataset.square !== drag.from) this.attemptMove(drag.from, dropped.dataset.square);
+  }
+
+  // --- moves -----------------------------------------------------------------
 
   showPromotion(candidates) {
     const byPiece = new Map(candidates.map((move) => [parseUci(move).promotion, move]));
     const buttons = PROMOTION_ORDER.filter((piece) => byPiece.has(piece)).map((piece) => {
       const button = document.createElement("button");
       button.type = "button";
-      button.className = "chess-button";
-      button.textContent = GLYPHS[piece];
+      button.className = "chess-button chess-promotion-choice";
       button.setAttribute("aria-label", `Promote to ${PIECE_NAMES[piece]}`);
+
+      const image = document.createElement("img");
+      image.className = "chess-piece";
+      image.alt = "";
+      image.src = this.pieceUrl(this.position.turn === "w" ? piece.toUpperCase() : piece);
+      button.appendChild(image);
+
       button.addEventListener("click", () => {
         this.hidePromotion();
         this.play(byPiece.get(piece));

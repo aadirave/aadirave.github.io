@@ -29,6 +29,7 @@ asset loading, and the message protocol work before the real engine arrives.
   .chess-board {
     display: grid;
     grid-template-columns: repeat(8, 1fr);
+    grid-template-rows: repeat(8, 1fr);
     width: min(88vw, 30rem);
     aspect-ratio: 1;
     border-radius: 4px;
@@ -41,13 +42,35 @@ asset loading, and the message protocol work before the real engine arrives.
     display: flex;
     align-items: center;
     justify-content: center;
+    aspect-ratio: 1;
+    min-width: 0;
+    min-height: 0;
     padding: 0;
     border: 0;
-    font-size: min(9vw, 2.6rem);
-    line-height: 1;
     cursor: pointer;
     background-repeat: no-repeat;
     background-position: center;
+    touch-action: none; /* a drag across the board must not scroll the page */
+  }
+
+  .chess-piece {
+    width: 88%;
+    height: 88%;
+    pointer-events: none;
+    user-select: none;
+  }
+
+  .chess-square.is-dragging .chess-piece {
+    visibility: hidden;
+  }
+
+  .chess-drag-ghost {
+    position: fixed;
+    top: 0;
+    left: 0;
+    z-index: 10;
+    pointer-events: none;
+    filter: drop-shadow(0 3px 5px rgb(0 0 0 / 40%));
   }
 
   .chess-square[data-shade="light"] {
@@ -56,19 +79,6 @@ asset loading, and the message protocol work before the real engine arrives.
 
   .chess-square[data-shade="dark"] {
     background-color: #779556;
-  }
-
-  .chess-square[data-color="w"] {
-    color: #fff;
-    text-shadow:
-      1px 0 0 #33333d,
-      -1px 0 0 #33333d,
-      0 1px 0 #33333d,
-      0 -1px 0 #33333d;
-  }
-
-  .chess-square[data-color="b"] {
-    color: #22222a;
   }
 
   .chess-square:focus-visible {
@@ -102,8 +112,6 @@ asset loading, and the message protocol work before the real engine arrives.
     background-image: radial-gradient(circle, rgb(0 0 0 / 28%) 21%, transparent 22%);
   }
 
-  /* Coordinates take their colour from the square, not from the piece sitting
-     on it -- otherwise a white piece's colour makes the label invisible. */
   .chess-square[data-file]::after,
   .chess-square[data-rank]::after {
     position: absolute;
@@ -174,22 +182,33 @@ asset loading, and the message protocol work before the real engine arrives.
     color: var(--global-text-color-light);
   }
 
+  .chess-credit {
+    font-size: 0.8rem;
+    color: var(--global-text-color-light);
+  }
+
   .chess-promotion {
     display: flex;
     gap: 0.4rem;
     margin-top: 0.9rem;
   }
 
-  .chess-promotion .chess-button {
-    font-size: 1.6rem;
-    line-height: 1;
-    padding: 0.2rem 0.5rem;
+  .chess-promotion-choice {
+    display: flex;
+    width: 2.6rem;
+    height: 2.6rem;
+    padding: 0.15rem;
   }
 </style>
 
 <div id="chess-app" class="chess-app">
   <noscript>This board needs JavaScript to run.</noscript>
 </div>
+
+<p class="chess-credit">
+  Piece graphics by <a href="https://en.wikipedia.org/wiki/User:Cburnett">Cburnett</a>, licensed
+  <a href="https://creativecommons.org/licenses/by-sa/3.0/">CC BY-SA 3.0</a>.
+</p>
 
 <script type="module">
   import { mountChessBoard } from "{{ '/assets/js/chess/ui.js' | relative_url }}";
@@ -199,5 +218,6 @@ asset loading, and the message protocol work before the real engine arrives.
   mountChessBoard(document.getElementById("chess-app"), {
     workerUrl: "{{ '/assets/js/chess/worker.js' | relative_url }}",
     engineUrl: "{{ '/assets/chess/chess_engine.js' | relative_url }}",
+    pieceBaseUrl: "{{ '/assets/img/chess/' | relative_url }}",
   });
 </script>
