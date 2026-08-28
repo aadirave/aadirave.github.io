@@ -2,13 +2,11 @@
 layout: page
 title: chess
 permalink: /chess/
-description: Play against my chess engine in the browser.
+description: play against my chess engine!
 nav: false
+category: work
+importance: 1
 ---
-
-The engine is a C++ program I wrote; the plan is to compile it to WebAssembly and run it here, entirely in your browser. **It is not wired up yet** — the
-board below talks to a placeholder that accepts any move and knows none of the rules, so nothing here is legal chess. It exists to prove the page, the
-asset loading, and the message protocol work before the real engine arrives.
 
 <!--
   Styles are inline on purpose. The starter may not own `_sass/` (the style
@@ -30,7 +28,7 @@ asset loading, and the message protocol work before the real engine arrives.
     display: grid;
     grid-template-columns: repeat(8, 1fr);
     grid-template-rows: repeat(8, 1fr);
-    width: min(88vw, 30rem);
+    width: min(92vw, 40rem);
     aspect-ratio: 1;
     border-radius: 4px;
     overflow: hidden;
@@ -115,7 +113,7 @@ asset loading, and the message protocol work before the real engine arrives.
   .chess-square[data-file]::after,
   .chess-square[data-rank]::after {
     position: absolute;
-    font-size: 0.62rem;
+    font-size: 0.72rem;
     font-weight: 600;
     line-height: 1;
     text-shadow: none;
