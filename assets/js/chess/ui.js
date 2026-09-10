@@ -12,8 +12,12 @@ import { colorOf, indexToSquare, parseFen, parseUci, squareToIndex } from "./fen
 const PIECE_NAMES = { k: "king", q: "queen", r: "rook", b: "bishop", n: "knight", p: "pawn" };
 const PROMOTION_ORDER = ["q", "r", "b", "n"];
 const DRAG_THRESHOLD_PX = 5;
-const MOVETIME_MS = 300;
-const MAX_DEPTH = 8;
+// Sized from gate W5: the wasm build runs at ~0.96x native, ~1.9M nps, so this
+// budget buys roughly a million nodes -- a real search, and still fast enough
+// that the reply lands before the board feels stalled. Depth is pinned to the
+// engine's own MAX_SEARCH_PLY so the clock, not the depth, is what stops it.
+const MOVETIME_MS = 500;
+const MAX_DEPTH = 64;
 
 /** Promise-per-request wrapper over the engine Worker. */
 class EngineClient {
@@ -151,10 +155,14 @@ class ChessBoard {
     const replyToggle = document.createElement("input");
     replyToggle.type = "checkbox";
     replyToggle.id = "chess-auto-reply";
+    // On by default now that the backend is the real engine: playing against it
+    // is the point of the page. It stayed off through Phase 1 only because the
+    // mock replied with arbitrary moves.
+    replyToggle.checked = true;
     const replyLabel = document.createElement("label");
     replyLabel.className = "chess-toggle";
     replyLabel.htmlFor = replyToggle.id;
-    replyLabel.append(replyToggle, document.createTextNode(" Placeholder replies"));
+    replyLabel.append(replyToggle, document.createTextNode(" Engine replies"));
 
     const promotion = document.createElement("div");
     promotion.className = "chess-promotion";

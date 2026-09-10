@@ -1,0 +1,6 @@
+# Deployed engine build shown on the chess page. Mirrors assets/chess/VERSION
+# (the artifact stamp for the vendored Emscripten build) -- Jekyll's Liquid
+# include tags can't read that file directly (include_relative rejects ".."
+# path segments, and include only searches _includes/), so the commit SHA is
+# duplicated here. Update this value whenever assets/chess/VERSION changes.
+engine_version: 7bec0f3

@@ -222,15 +222,28 @@ importance: 1
   Piece graphics by <a href="https://en.wikipedia.org/wiki/User:Cburnett">Cburnett</a>, licensed
   <a href="https://creativecommons.org/licenses/by-sa/3.0/">CC BY-SA 3.0</a>.
 </p>
+<!--
+  site.data.chess.engine_version mirrors assets/chess/VERSION -- Liquid's include/
+  include_relative tags can't read a file outside _includes/ or reached via "..",
+  so the vendored engine's commit SHA is duplicated into _data/chess.yml instead
+  of read from the artifact stamp directly. Keep it in sync when re-vendoring.
+-->
+<p class="chess-credit">engine @ {{ site.data.chess.engine_version }}</p>
 
 <script type="module">
   import { mountChessBoard } from "{{ '/assets/js/chess/ui.js' | relative_url }}";
 
   // The Worker is a static file and gets no Liquid pass, so it cannot resolve
   // site paths itself -- the engine URL is resolved here and handed over as data.
+  //
+  // chess_engine.min.js is NOT minified -- it's vendored byte-for-byte from the
+  // engine repo. jekyll-terser has no config-driven exclude, only a hardcoded
+  // skip for paths ending ".min.js", so this suffix is the only way to stop it
+  // re-minifying the glue and shipping a derivative of what the engine repo's
+  // equivalence gates (W-1/W-2/W-3) actually ran against. Don't "fix" the name.
   mountChessBoard(document.getElementById("chess-app"), {
     workerUrl: "{{ '/assets/js/chess/worker.js' | relative_url }}",
-    engineUrl: "{{ '/assets/chess/chess_engine.js' | relative_url }}",
+    engineUrl: "{{ '/assets/chess/chess_engine.min.js' | relative_url }}",
     pieceBaseUrl: "{{ '/assets/img/chess/' | relative_url }}",
   });
 </script>

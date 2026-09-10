@@ -10,21 +10,21 @@
  */
 
 import { REQ, RES } from "./protocol.js";
-import { createMockBackend } from "./mock.js";
+import { createWasmBackend } from "./wasm.js";
 
 let backend = null;
 
 /**
- * `engineUrl` is the page-resolved URL of the Emscripten glue. It is unused
- * while the backend is mocked, but is part of the protocol from day one so
- * that wiring the real module up is a change to this function alone:
- *
- *   const factory = (await import(engineUrl)).default;
- *   const module = await factory();
- *   return createWasmBackend(module);   // ccall wrappers over the ce_* exports
+ * `engineUrl` is the page-resolved URL of the Emscripten glue, passed in as
+ * data because a Worker gets no Liquid pass and so cannot resolve a site path
+ * itself. The glue locates its own `.wasm` sibling relative to `import.meta.url`,
+ * so only this one path has to cross the seam -- and it stays correct under
+ * both the blank baseurl and `--baseurl /al-folio`.
  */
 async function loadBackend(engineUrl) {
-  return createMockBackend();
+  if (!engineUrl) throw new Error("init requires an engineUrl");
+  const factory = (await import(engineUrl)).default;
+  return createWasmBackend(await factory());
 }
 
 function reply(id, value) {
