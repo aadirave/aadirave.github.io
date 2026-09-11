@@ -11,10 +11,20 @@ importance: 1
 <!--
   Styles are inline on purpose. The starter may not own `_sass/` (the style
   contract fails CI if it does), and PurgeCSS rewrites only `_site/assets/css/*.css`
-  during deploy -- so a page-scoped <style> block is both the allowed home for
+  during deploy -- so a page-scoped style element is both the allowed home for
   this CSS and the one place a script-applied class cannot be purged out from
   under the board.
+
+  Never write a literal style/script/pre/textarea start tag inside an HTML
+  comment on this page. jekyll-minifier (production builds only) preserves those
+  elements by regex before it strips comments, so a tag mentioned in prose is
+  paired with the real closing tag below; comment removal then deletes from this
+  comment through the next "-->" in the file, silently taking the stylesheet and
+
+the board's mount point with it. That shipped once -- the deployed page
+rendered the title and the engine stamp with no board between them.
 -->
+
 <style>
   .chess-app {
     display: flex;
