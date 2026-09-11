@@ -12,11 +12,12 @@ import { colorOf, indexToSquare, parseFen, parseUci, squareToIndex } from "./fen
 const PIECE_NAMES = { k: "king", q: "queen", r: "rook", b: "bishop", n: "knight", p: "pawn" };
 const PROMOTION_ORDER = ["q", "r", "b", "n"];
 const DRAG_THRESHOLD_PX = 5;
-// Sized from gate W5: the wasm build runs at ~0.96x native, ~1.9M nps, so this
-// budget buys roughly a million nodes -- a real search, and still fast enough
-// that the reply lands before the board feels stalled. Depth is pinned to the
-// engine's own MAX_SEARCH_PLY so the clock, not the depth, is what stops it.
-const MOVETIME_MS = 500;
+// Sized from gate W5, measured on the NNUE path this site actually ships (wasm
+// SIMD128, ~0.88x native, ~1.55M nps aggregate), so this budget buys roughly
+// three million nodes -- a real search, and still fast enough that the reply
+// lands before the board feels stalled. Depth is pinned to the engine's own
+// MAX_SEARCH_PLY so the clock, not the depth, is what stops it.
+const MOVETIME_MS = 2000;
 const MAX_DEPTH = 64;
 
 /** Promise-per-request wrapper over the engine Worker. */
@@ -539,19 +540,47 @@ class ChessBoard {
 
   async engineReply(gen) {
     this.setStatus("Thinking…");
-    const best = await this.engine.request(REQ.SEARCH, { movetimeMs: MOVETIME_MS, maxDepth: MAX_DEPTH });
-    if (gen !== this.generation) return;
-    if (!best) return;
-    // Mirror play()'s own rejection path: the engine's move is not exempt
-    // from being an authority-checked move just because it made it itself.
-    const accepted = await this.engine.request(REQ.PUSH, { move: best });
-    if (gen !== this.generation) return;
-    if (!accepted) {
-      this.setStatus("The engine's own reply was rejected.");
-      return;
+    // `info` messages carry no `id` (see protocol.js), so unlike a request's
+    // own result they can't be matched to this search by the protocol itself
+    // -- only this closure's `gen` can. The guard matters because the search
+    // this belongs to can be abandoned (New Game) while it is still running:
+    // it's one blocking call on the worker thread, so it keeps emitting
+    // progress, and without the check that progress would go on overwriting
+    // the status line of whatever game superseded it.
+    this.engine.onInfo = (info) => {
+      if (gen !== this.generation) return;
+      // The score the engine reports is relative to the side to move, which
+      // during this reply is the engine itself (see shouldEngineMove) -- a
+      // raw "+1.5" would tell a losing human player the opposite of the
+      // truth. Depth carries no such sign and is what actually answers "is
+      // it still working", so that's all this shows.
+      this.setStatus(`Thinking… (depth ${info.depth})`);
+    };
+    try {
+      const best = await this.engine.request(REQ.SEARCH, { movetimeMs: MOVETIME_MS, maxDepth: MAX_DEPTH });
+      if (gen !== this.generation) return;
+      if (!best) return;
+      // Mirror play()'s own rejection path: the engine's move is not exempt
+      // from being an authority-checked move just because it made it itself.
+      const accepted = await this.engine.request(REQ.PUSH, { move: best });
+      if (gen !== this.generation) return;
+      if (!accepted) {
+        this.setStatus("The engine's own reply was rejected.");
+        return;
+      }
+      this.lastMove = parseUci(best);
+      await this.refresh(gen);
+    } finally {
+      // The depth readout belongs to this search alone -- whatever the status
+      // line says next (from refresh(), an error, or nothing), it must not
+      // still be wired to a search that is over. Guarded on `gen` like every
+      // other cleanup in this file: a superseded search must not tear down
+      // the handler its successor installed. The worker's own ordering makes
+      // that unreachable today -- a search's result always arrives before the
+      // request that superseded it -- but that is an ordering guarantee, not
+      // an invariant this file states, and the guard costs nothing.
+      if (gen === this.generation) this.engine.onInfo = () => {};
     }
-    this.lastMove = parseUci(best);
-    await this.refresh(gen);
   }
 
   async onNewGame() {
