@@ -63,6 +63,10 @@ class ChessBoard {
     this.pieceBaseUrl = options.pieceBaseUrl;
     this.workerUrl = options.workerUrl;
     this.squares = new Map();
+    // The side the human plays: it picks the board's orientation and, by
+    // elimination, the side the engine answers as. Set before buildDom(),
+    // which lays the squares out from it.
+    this.playerColor = "w";
     this.position = null;
     this.legalMoves = [];
     this.selected = null;
@@ -98,6 +102,8 @@ class ChessBoard {
       this.ready = true;
       this.boardEl.classList.remove("is-unavailable");
       await this.refresh(gen);
+      if (gen !== this.generation) return;
+      if (this.shouldEngineMove()) await this.engineReply(gen);
     } catch (error) {
       if (gen !== this.generation) return;
       this.ready = false;
@@ -122,9 +128,9 @@ class ChessBoard {
       button.type = "button";
       button.className = "chess-square";
       button.dataset.square = square;
+      // Shade follows the square itself, not its position in the DOM, so
+      // flipping the board never repaints a1 as a light square.
       button.dataset.shade = (Math.floor(index / 8) + (index % 8)) % 2 === 0 ? "light" : "dark";
-      if (index >= 56) button.dataset.file = square[0];
-      if (index % 8 === 0) button.dataset.rank = square[1];
 
       // One <img> per square, reused across renders so dragging a piece never
       // races a freshly created element.
@@ -164,13 +170,32 @@ class ChessBoard {
     replyLabel.htmlFor = replyToggle.id;
     replyLabel.append(replyToggle, document.createTextNode(" Engine replies"));
 
+    const sideSelect = document.createElement("select");
+    sideSelect.id = "chess-side";
+    sideSelect.className = "chess-select";
+    for (const [value, text] of [
+      ["w", "White"],
+      ["b", "Black"],
+    ]) {
+      const option = document.createElement("option");
+      option.value = value;
+      option.textContent = text;
+      sideSelect.appendChild(option);
+    }
+    sideSelect.value = this.playerColor;
+    sideSelect.addEventListener("change", () => this.onSideChange(sideSelect.value));
+    const sideLabel = document.createElement("label");
+    sideLabel.className = "chess-toggle";
+    sideLabel.htmlFor = sideSelect.id;
+    sideLabel.append(document.createTextNode("Play as "), sideSelect);
+
     const promotion = document.createElement("div");
     promotion.className = "chess-promotion";
     promotion.hidden = true;
 
     const controls = document.createElement("div");
     controls.className = "chess-controls";
-    controls.append(newGame, replyLabel);
+    controls.append(newGame, sideLabel, replyLabel);
 
     const panel = document.createElement("div");
     panel.className = "chess-panel";
@@ -181,6 +206,67 @@ class ChessBoard {
     this.statusEl = status;
     this.promotionEl = promotion;
     this.replyToggle = replyToggle;
+    this.sideSelect = sideSelect;
+    this.applyOrientation();
+  }
+
+  /** The side the engine answers as -- always the one the human isn't playing. */
+  get engineColor() {
+    return this.playerColor === "w" ? "b" : "w";
+  }
+
+  /**
+   * Lays the 64 buttons out from the player's side of the board and re-labels
+   * the edges, since which rank is nearest and which file is leftmost both
+   * change with orientation. The squares Map is built in a8..h1 order, so
+   * black's view is exactly that reversed.
+   *
+   * Reordering the DOM rather than rotating it with a transform keeps the
+   * pieces, the coordinate labels and the drag ghost upright without each
+   * needing a counter-rotation.
+   */
+  applyOrientation() {
+    const order = [...this.squares.keys()];
+    if (this.playerColor === "b") order.reverse();
+    order.forEach((square, position) => {
+      const button = this.squares.get(square);
+      delete button.dataset.file;
+      delete button.dataset.rank;
+      if (position >= 56) button.dataset.file = square[0];
+      if (position % 8 === 0) button.dataset.rank = square[1];
+      this.boardEl.appendChild(button);
+    });
+  }
+
+  /**
+   * Whether it is the engine's turn to answer. An empty move list means the
+   * game is over, so this also stops a search being started on a finished
+   * position.
+   */
+  shouldEngineMove() {
+    return Boolean(this.replyToggle.checked && this.position && this.position.turn === this.engineColor && this.legalMoves.length > 0);
+  }
+
+  async onSideChange(color) {
+    if (color === this.playerColor) return;
+    this.playerColor = color;
+    this.applyOrientation();
+    // Both belonged to the orientation being left behind.
+    this.select(null);
+    this.hidePromotion();
+    // Switching sides mid-game hands the side just vacated to the engine
+    // rather than resetting -- New Game is right there for a fresh start.
+    // A move already in flight will finish and is left to run its course.
+    if (!this.ready || this.busy || !this.shouldEngineMove()) return;
+    const gen = ++this.generation;
+    this.busy = true;
+    try {
+      await this.engineReply(gen);
+    } catch (error) {
+      if (gen === this.generation) this.setStatus(`Engine error: ${error.message}`);
+    } finally {
+      if (gen === this.generation) this.busy = false;
+    }
   }
 
   setStatus(text) {
@@ -443,7 +529,7 @@ class ChessBoard {
       this.lastMove = parseUci(move);
       await this.refresh(gen);
       if (gen !== this.generation) return;
-      if (this.replyToggle.checked) await this.engineReply(gen);
+      if (this.shouldEngineMove()) await this.engineReply(gen);
     } catch (error) {
       if (gen === this.generation) this.setStatus(`Engine error: ${error.message}`);
     } finally {
@@ -483,6 +569,8 @@ class ChessBoard {
       this.lastMove = null;
       this.hidePromotion();
       await this.refresh(gen);
+      if (gen !== this.generation) return;
+      if (this.shouldEngineMove()) await this.engineReply(gen);
     } catch (error) {
       if (gen === this.generation) this.setStatus(`Engine error: ${error.message}`);
     } finally {

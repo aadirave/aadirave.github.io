@@ -15,14 +15,21 @@ importance: 1
   this CSS and the one place a script-applied class cannot be purged out from
   under the board.
 
-  Never write a literal style/script/pre/textarea start tag inside an HTML
-  comment on this page. jekyll-minifier (production builds only) preserves those
-  elements by regex before it strips comments, so a tag mentioned in prose is
-  paired with the real closing tag below; comment removal then deletes from this
-  comment through the next "-->" in the file, silently taking the stylesheet and
+  Two things must never appear inside an HTML comment on this page, both of
+  which have already broken it once:
 
-the board's mount point with it. That shipped once -- the deployed page
-rendered the title and the engine stamp with no board between them.
+  1. A literal start tag for style, script, pre or textarea. jekyll-minifier
+     runs on production builds only and preserves those elements by regex
+     before it strips comments, so a tag named in prose gets paired with the
+     real closing tag below. Comment removal then ran from the comment naming
+     it all the way to the end of the next comment, deleting the stylesheet,
+     the board's mount point and the credit line. The deployed page rendered
+     its title and engine stamp with no board between them.
+
+  2. A literal comment-closing delimiter, even in quotes. It ends the comment
+     early and everything after it renders as visible page text.
+
+  Name the tags in prose, as above, and neither happens.
 -->
 
 <style>
@@ -203,6 +210,16 @@ rendered the title and the engine stamp with no board between them.
     margin: 0;
     font-size: 0.9rem;
     color: var(--global-text-color-light);
+  }
+
+  .chess-select {
+    padding: 0.25rem 0.4rem;
+    border: 1px solid var(--global-divider-color);
+    border-radius: 4px;
+    background: var(--global-card-bg-color);
+    color: var(--global-text-color);
+    font-size: 0.9rem;
+    cursor: pointer;
   }
 
   .chess-credit {
